@@ -1753,3 +1753,207 @@ func TestPlanQuery_scrubWithAlias(t *testing.T) {
 	assert.Equal(t, "allUsers", firstField.Name)
 	assert.Equal(t, "users", firstField.Alias)
 }
+
+func TestPlanQuery_unionFragments(t *testing.T) {
+	location1 := "cats"
+	location2 := "dogs"
+
+	schema, _ := graphql.LoadSchema(`
+		type Cat {
+			id: ID!
+			name: String!
+		}
+
+		type Dog {
+			id: ID!
+			name: String!
+		}
+
+		union Animal = Cat | Dog
+
+		type Query {
+			animals: [Animal!]!
+		}
+	`)
+
+	// The location map for fields for this query.
+	// `Cat` at location1, `Dog` at location2
+	locations := FieldURLMap{}
+	locations.RegisterURL("Query", "animals", location1)
+	locations.RegisterURL("Cat", "name", location1)
+	locations.RegisterURL("Cat", "id", location1, location2)
+	locations.RegisterURL("Dog", "name", location2)
+	locations.RegisterURL("Dog", "id", location1, location2)
+
+	t.Run("just inline fragments", func(t *testing.T) {
+		q := `
+		query {
+			animals {
+				... on Cat {
+					id
+					name
+				}
+				... on Dog {
+					
+					name
+				}
+			}
+		}
+		`
+
+		plans, err := (&MinQueriesPlanner{}).Plan(&PlanningContext{
+			Query:     q,
+			Schema:    schema,
+			Locations: locations,
+		})
+
+		// if something went wrong planning the query
+		if err != nil {
+			// the test is over
+			t.Errorf("encountered error when building schema: %s", err.Error())
+			return
+		}
+
+		assert.Equal(t, 1, len(plans))
+		firstStep := plans[0].RootStep.Then[0]
+
+		// animals fields
+		selectedField, ok := firstStep.SelectionSet[0].(*ast.Field)
+		assert.True(t, ok)
+		assert.Equal(t, "animals", selectedField.Name)
+
+		// cat fragment
+		firstFragment := selectedField.SelectionSet
+		assert.Equal(t, 1, firstFragment)
+
+		// check that this is fragment actually
+		_, ok = firstFragment[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+
+		// dog step
+		// check that this is not nil
+		assert.NotNil(t, firstStep.Then)
+		secondStep := firstStep.Then[0]
+		// check that fragment selected
+		_, ok = secondStep.SelectionSet[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+	})
+
+	t.Run("named fragment spread inside inline fragments", func(t *testing.T) {
+		q := `
+		query {
+			animals {
+				... on Cat {
+					...CF
+				}
+				... on Dog {
+					...DF
+				}
+			}
+		}
+
+		fragment CF on Cat {
+			id,
+			name
+		}
+		fragment DF on Dog {
+			id,
+			name
+		}
+		`
+
+		plans, err := (&MinQueriesPlanner{}).Plan(&PlanningContext{
+			Query:     q,
+			Schema:    schema,
+			Locations: locations,
+		})
+
+		// if something went wrong planning the query
+		if err != nil {
+			// the test is over
+			t.Errorf("encountered error when building schema: %s", err.Error())
+			return
+		}
+
+		assert.Equal(t, 1, len(plans))
+		firstStep := plans[0].RootStep.Then[0]
+
+		// animals fields
+		selectedField, ok := firstStep.SelectionSet[0].(*ast.Field)
+		assert.True(t, ok)
+		assert.Equal(t, "animals", selectedField.Name)
+
+		// cat fragment
+		firstFragment := selectedField.SelectionSet
+		assert.Equal(t, 1, firstFragment)
+
+		// check that this is fragment actually
+		_, ok = firstFragment[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+
+		// dog step
+		// check that this is not nil
+		assert.NotNil(t, firstStep.Then)
+		secondStep := firstStep.Then[0]
+		// check that fragment selected
+		_, ok = secondStep.SelectionSet[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+	})
+
+	t.Run("named fragment spread", func(t *testing.T) {
+		q := `
+		query {
+			animals {
+				...CF
+				...DF
+			}
+		}
+
+		fragment CF on Cat {
+			id
+			name
+		}
+		fragment DF on Dog {
+			id
+			name
+		}
+		`
+
+		plans, err := (&MinQueriesPlanner{}).Plan(&PlanningContext{
+			Query:     q,
+			Schema:    schema,
+			Locations: locations,
+		})
+
+		// if something went wrong planning the query
+		if err != nil {
+			// the test is over
+			t.Errorf("encountered error when building schema: %s", err.Error())
+			return
+		}
+
+		assert.Equal(t, 1, len(plans))
+		firstStep := plans[0].RootStep.Then[0]
+
+		// animals fields
+		selectedField, ok := firstStep.SelectionSet[0].(*ast.Field)
+		assert.True(t, ok)
+		assert.Equal(t, "animals", selectedField.Name)
+
+		// cat fragment
+		firstFragment := selectedField.SelectionSet
+		assert.Equal(t, 1, firstFragment)
+
+		// check that this is fragment actually
+		_, ok = firstFragment[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+
+		// dog step
+		// check that this is not nil
+		assert.NotNil(t, firstStep.Then)
+		secondStep := firstStep.Then[0]
+		// check that fragment selected
+		_, ok = secondStep.SelectionSet[0].(*ast.InlineFragment)
+		assert.True(t, ok)
+	})
+}

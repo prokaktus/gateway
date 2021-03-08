@@ -230,6 +230,7 @@ func (p *MinQueriesPlanner) generatePlans(ctx *PlanningContext, query *ast.Query
 						insertionPoint: payload.InsertionPoint,
 						plan:           payload.Plan,
 						wrapper:        payload.Wrapper,
+						schema: 		ctx.Schema,
 					})
 					if err != nil {
 						errCh <- err
@@ -320,6 +321,7 @@ type extractSelectionConfig struct {
 	selection      ast.SelectionSet
 	insertionPoint []string
 	wrapper        ast.SelectionSet
+	schema *ast.Schema
 }
 
 func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (ast.SelectionSet, error) {
@@ -338,6 +340,9 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 
 	// we only need to add an ID field if there are steps coming off of this insertion point
 	checkForID := false
+	isParentUnion := checkIsParentUnion(config)
+	//isParentUnion := false
+	var unionSelections []*ast.InlineFragment
 
 	// we have to make sure we spawn any more goroutines before this one terminates. This means that
 	// we first have to look at any locations that are not the current one
@@ -357,6 +362,19 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 		// if there are selections in this bundle that are not from the parent location we need to add
 		// id to the selection set
 		checkForID = true
+
+		// if parent type is union, we cannot query selection by id explicitly
+		// instead we should wrap id queries into fragments with id
+		if isParentUnion {
+			for _, selection := range selectionSet {
+				switch field := selection.(type) {
+				case *ast.InlineFragment:
+					unionSelections = append(unionSelections, buildIdFragment(field))
+				default:
+					continue
+				}
+			}
+		}
 
 		// if we have a wrapper to add
 		if config.wrapper != nil && len(config.wrapper) > 0 {
@@ -387,8 +405,20 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 
 	// if we have to have an id field on this selection set
 	if checkForID {
-		// add the id field since duplicates are ignored
-		locationFields[config.parentLocation] = append(locationFields[config.parentLocation], &ast.Field{Name: "id"})
+		if isParentUnion {
+			// since we cannot add id directly to union
+			// we add fragments with id
+			for _, selection := range unionSelections {
+				locationFields[config.parentLocation] = append(
+					locationFields[config.parentLocation],
+					selection,
+				)
+			}
+		} else {
+			// add the id field since duplicates are ignored
+			fieldToAdd := &ast.Field{Name: "id"}
+			locationFields[config.parentLocation] = append(locationFields[config.parentLocation], fieldToAdd)
+		}
 	}
 
 	// now we have to generate a selection set for fields that are coming from the same location as the parent
@@ -439,6 +469,7 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 					selection:      selection.SelectionSet,
 					insertionPoint: insertionPoint,
 					wrapper:        wrapper,
+					schema: 		config.schema,
 				})
 				if err != nil {
 					return nil, err
@@ -488,6 +519,7 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 
 				parentType: defn.TypeCondition,
 				selection:  defn.SelectionSet,
+				schema: 	config.schema,
 				// Children should now be wrapped by this fragment and nothing else
 				wrapper: ast.SelectionSet{selection},
 			})
@@ -530,6 +562,7 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 				parentType: selection.TypeCondition,
 				selection:  selection.SelectionSet,
 				wrapper:    newWrapper,
+				schema: 	config.schema,
 			})
 
 			if err != nil {
@@ -754,7 +787,8 @@ func (p *MinQueriesPlanner) groupSelectionSet(config *extractSelectionConfig) (m
 					}
 
 					// add the field to the location
-					fragmentLocations[fieldLocations[0]] = append(fragmentLocations[fieldLocations[0]], fragmentSelection)
+					fieldLocation := fieldLocations[0]
+					fragmentLocations[fieldLocation] = append(fragmentLocations[fieldLocations[0]], fragmentSelection)
 
 				case *ast.FragmentSpread, *ast.InlineFragment:
 					// non-field selections will be handled in the next tick
@@ -870,6 +904,20 @@ func coreFieldType(source *ast.Field) *ast.Type {
 	return source.Definition.Type
 }
 
+func checkIsParentUnion(config *extractSelectionConfig) bool {
+	if config == nil || config.schema == nil {
+		return false
+	}
+
+	parentType := config.parentType
+	astType, exists := config.schema.Types[parentType]
+	if !exists {
+		return false
+	}
+
+	return astType.Kind == ast.Union
+}
+
 // Set is a set
 type Set map[string]bool
 
@@ -974,6 +1022,16 @@ func plannerBuildQuery(operationName, parentType string, variables ast.VariableD
 	return &ast.QueryDocument{
 		Operations: ast.OperationList{operation},
 		Fragments:  fragmentDefinitions,
+	}
+}
+
+func buildIdFragment(field *ast.InlineFragment) *ast.InlineFragment {
+	return &ast.InlineFragment{
+		TypeCondition: field.TypeCondition,
+		Directives: field.Directives,
+		SelectionSet: ast.SelectionSet{
+			&ast.Field{Name: "id"},
+		},
 	}
 }
 
