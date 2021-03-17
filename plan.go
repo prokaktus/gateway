@@ -230,7 +230,7 @@ func (p *MinQueriesPlanner) generatePlans(ctx *PlanningContext, query *ast.Query
 						insertionPoint: payload.InsertionPoint,
 						plan:           payload.Plan,
 						wrapper:        payload.Wrapper,
-						schema: 		ctx.Schema,
+						schema:         ctx.Schema,
 					})
 					if err != nil {
 						errCh <- err
@@ -321,7 +321,7 @@ type extractSelectionConfig struct {
 	selection      ast.SelectionSet
 	insertionPoint []string
 	wrapper        ast.SelectionSet
-	schema *ast.Schema
+	schema         *ast.Schema
 }
 
 func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (ast.SelectionSet, error) {
@@ -341,7 +341,6 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 	// we only need to add an ID field if there are steps coming off of this insertion point
 	checkForID := false
 	isParentUnion := checkIsParentUnion(config)
-	//isParentUnion := false
 	var unionSelections []*ast.InlineFragment
 
 	// we have to make sure we spawn any more goroutines before this one terminates. This means that
@@ -519,7 +518,7 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 
 				parentType: defn.TypeCondition,
 				selection:  defn.SelectionSet,
-				schema: 	config.schema,
+				schema:     config.schema,
 				// Children should now be wrapped by this fragment and nothing else
 				wrapper: ast.SelectionSet{selection},
 			})
@@ -562,7 +561,7 @@ func (p *MinQueriesPlanner) extractSelection(config *extractSelectionConfig) (as
 				parentType: selection.TypeCondition,
 				selection:  selection.SelectionSet,
 				wrapper:    newWrapper,
-				schema: 	config.schema,
+				schema:     config.schema,
 			})
 
 			if err != nil {

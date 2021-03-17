@@ -1794,7 +1794,7 @@ func TestPlanQuery_unionFragments(t *testing.T) {
 					name
 				}
 				... on Dog {
-					
+					id
 					name
 				}
 			}
@@ -1914,7 +1914,6 @@ func TestPlanQuery_unionFragments(t *testing.T) {
 			name
 		}
 		fragment DF on Dog {
-			id
 			name
 		}
 		`
