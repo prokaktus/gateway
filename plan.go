@@ -28,6 +28,8 @@ type QueryPlanStep struct {
 	QueryString         string
 	FragmentDefinitions ast.FragmentDefinitionList
 	Variables           Set
+
+	once sync.Once
 }
 
 // QueryPlan is the full plan to resolve a particular query
